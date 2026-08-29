@@ -53,100 +53,89 @@ export class MessagingMessagesImportCronJob {
       },
     });
 
-    for (const activeWorkspace of activeWorkspaces) {
+    const activeWorkspaceIds = activeWorkspaces.map(
+      (workspace) => workspace.id,
+    );
+
+    if (activeWorkspaceIds.length === 0) {
+      return;
+    }
+
+    const pendingMessageChannels = await this.messageChannelRepository
+      .find({
+        where: {
+          workspaceId: In(activeWorkspaceIds),
+          isSyncEnabled: true,
+          syncStage: MessageChannelSyncStage.MESSAGES_IMPORT_PENDING,
+          type: Not(MessageChannelType.EMAIL_GROUP),
+        },
+      })
+      .catch((error): MessageChannelEntity[] => {
+        this.exceptionHandlerService.captureExceptions([error]);
+
+        return [];
+      });
+
+    const messageChannelsToSchedule = pendingMessageChannels.filter(
+      (messageChannel) =>
+        !isThrottled(
+          toIsoStringOrNull(messageChannel.syncStageStartedAt),
+          messageChannel.throttleFailureCount,
+          toIsoStringOrNull(messageChannel.throttleRetryAfter),
+        ),
+    );
+
+    const throttledCount =
+      pendingMessageChannels.length - messageChannelsToSchedule.length;
+
+    if (throttledCount > 0) {
+      this.logger.log(`Skipped ${throttledCount} throttled message channels`);
+    }
+
+    if (messageChannelsToSchedule.length === 0) {
+      return;
+    }
+
+    const workspaceIdByMessageChannelId = new Map(
+      messageChannelsToSchedule.map((messageChannel) => [
+        messageChannel.id,
+        messageChannel.workspaceId,
+      ]),
+    );
+
+    const updateResult = await this.messageChannelRepository
+      .createQueryBuilder()
+      .update()
+      .set({
+        syncStage: MessageChannelSyncStage.MESSAGES_IMPORT_SCHEDULED,
+        syncStageStartedAt: new Date(),
+      })
+      .where({
+        id: In([...workspaceIdByMessageChannelId.keys()]),
+        isSyncEnabled: true,
+        syncStage: MessageChannelSyncStage.MESSAGES_IMPORT_PENDING,
+      })
+      .returning('id')
+      .execute();
+
+    const updatedIds = updateResult.raw.map((row: { id: string }) => row.id);
+
+    for (const messageChannelId of updatedIds) {
+      const workspaceId = workspaceIdByMessageChannelId.get(messageChannelId);
+
+      if (!isDefined(workspaceId)) {
+        continue;
+      }
+
       try {
-        const pendingMessageChannels = await this.messageChannelRepository.find(
-          {
-            where: {
-              workspaceId: activeWorkspace.id,
-              isSyncEnabled: true,
-              syncStage: MessageChannelSyncStage.MESSAGES_IMPORT_PENDING,
-              type: Not(MessageChannelType.EMAIL_GROUP),
-            },
-          },
+        await this.messageQueueService.add<MessagingMessagesImportJobData>(
+          MessagingMessagesImportJob.name,
+          { workspaceId, messageChannelId },
         );
-
-        const messageChannelsToSchedule = pendingMessageChannels.filter(
-          (messageChannel) =>
-            !isThrottled(
-              toIsoStringOrNull(messageChannel.syncStageStartedAt),
-              messageChannel.throttleFailureCount,
-              toIsoStringOrNull(messageChannel.throttleRetryAfter),
-            ),
-        );
-
-        const throttledCount =
-          pendingMessageChannels.length - messageChannelsToSchedule.length;
-
-        if (throttledCount > 0) {
-          this.logger.log(
-            `Skipped ${throttledCount} throttled message channels for workspace ${activeWorkspace.id}`,
-          );
-        }
-
-        if (messageChannelsToSchedule.length === 0) {
-          continue;
-        }
-
-        const messageChannelIdsToSchedule = messageChannelsToSchedule.map(
-          (messageChannel) => messageChannel.id,
-        );
-
-        const updateResult = await this.messageChannelRepository
-          .createQueryBuilder()
-          .update()
-          .set({
-            syncStage: MessageChannelSyncStage.MESSAGES_IMPORT_SCHEDULED,
-            syncStageStartedAt: new Date(),
-          })
-          .where({
-            id: In(messageChannelIdsToSchedule),
-            workspaceId: activeWorkspace.id,
-            isSyncEnabled: true,
-            syncStage: MessageChannelSyncStage.MESSAGES_IMPORT_PENDING,
-          })
-          .returning('id')
-          .execute();
-
-        const updatedIds = updateResult.raw.map(
-          (row: { id: string }) => row.id,
-        );
-
-        for (const messageChannelId of updatedIds) {
-          await this.messageQueueService.add<MessagingMessagesImportJobData>(
-            MessagingMessagesImportJob.name,
-            {
-              workspaceId: activeWorkspace.id,
-              messageChannelId,
-            },
-          );
-        }
       } catch (error) {
-        if (
-          error.code === '42P01' &&
-          error.message.includes('messageChannel" does not exist')
-        ) {
-          const refetchedWorkspace = await this.workspaceRepository.findOneBy({
-            id: activeWorkspace.id,
-          });
-
-          if (isDefined(refetchedWorkspace)) {
-            this.exceptionHandlerService.captureExceptions([error], {
-              workspace: {
-                id: activeWorkspace.id,
-              },
-            });
-            throw new Error(
-              'Workspace schema not found while the workspace is still active',
-            );
-          }
-        } else {
-          this.exceptionHandlerService.captureExceptions([error], {
-            workspace: {
-              id: activeWorkspace.id,
-            },
-          });
-        }
+        this.exceptionHandlerService.captureExceptions([error], {
+          workspace: { id: workspaceId },
+        });
       }
     }
   }
