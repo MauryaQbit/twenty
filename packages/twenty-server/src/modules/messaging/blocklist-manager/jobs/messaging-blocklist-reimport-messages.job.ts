@@ -52,48 +52,146 @@ export class BlocklistReimportMessagesJob {
             { shouldBypassPermissionChecks: true },
           );
 
-        for (const eventPayload of data.events) {
-          const workspaceMemberId =
-            eventPayload.properties.before.workspaceMemberId;
+        const workspaceMemberIds = [
+          ...new Set(
+            data.events.map(
+              (eventPayload) =>
+                eventPayload.properties.before.workspaceMemberId,
+            ),
+          ),
+        ];
 
-          const workspaceMember = await workspaceMemberRepository.findOne({
-            where: { id: workspaceMemberId },
-          });
+        const workspaceMembers =
+          workspaceMemberIds.length > 0
+            ? await workspaceMemberRepository.find({
+                where: { id: In(workspaceMemberIds) },
+              })
+            : [];
+
+        const workspaceMemberByIdMap = new Map(
+          workspaceMembers.map((workspaceMember) => [
+            workspaceMember.id,
+            workspaceMember,
+          ]),
+        );
+
+        const userWorkspaces =
+          workspaceMembers.length > 0
+            ? await this.userWorkspaceRepository.find({
+                where: {
+                  userId: In(workspaceMembers.map(({ userId }) => userId)),
+                  workspaceId,
+                },
+              })
+            : [];
+
+        const userWorkspaceByUserIdMap = new Map(
+          userWorkspaces.map((userWorkspace) => [
+            userWorkspace.userId,
+            userWorkspace,
+          ]),
+        );
+
+        const connectedAccounts =
+          userWorkspaces.length > 0
+            ? await this.connectedAccountRepository.find({
+                where: {
+                  userWorkspaceId: In(userWorkspaces.map(({ id }) => id)),
+                  workspaceId,
+                },
+              })
+            : [];
+
+        const connectedAccountsByUserWorkspaceIdMap = new Map<
+          string,
+          ConnectedAccountEntity[]
+        >();
+
+        for (const connectedAccount of connectedAccounts) {
+          const existing = connectedAccountsByUserWorkspaceIdMap.get(
+            connectedAccount.userWorkspaceId,
+          );
+
+          if (existing) {
+            existing.push(connectedAccount);
+          } else {
+            connectedAccountsByUserWorkspaceIdMap.set(
+              connectedAccount.userWorkspaceId,
+              [connectedAccount],
+            );
+          }
+        }
+
+        const messageChannels =
+          connectedAccounts.length > 0
+            ? await this.messageChannelRepository.find({
+                where: {
+                  connectedAccountId: In(
+                    connectedAccounts.map(({ id }) => id),
+                  ),
+                  syncStage: Not(
+                    MessageChannelSyncStage.MESSAGE_LIST_FETCH_PENDING,
+                  ),
+                  workspaceId,
+                },
+              })
+            : [];
+
+        const messageChannelsByConnectedAccountIdMap = new Map<
+          string,
+          MessageChannelEntity[]
+        >();
+
+        for (const messageChannel of messageChannels) {
+          const existing = messageChannelsByConnectedAccountIdMap.get(
+            messageChannel.connectedAccountId,
+          );
+
+          if (existing) {
+            existing.push(messageChannel);
+          } else {
+            messageChannelsByConnectedAccountIdMap.set(
+              messageChannel.connectedAccountId,
+              [messageChannel],
+            );
+          }
+        }
+
+        for (const workspaceMemberId of workspaceMemberIds) {
+          const workspaceMember =
+            workspaceMemberByIdMap.get(workspaceMemberId);
 
           if (!workspaceMember) {
             continue;
           }
 
-          const userWorkspace = await this.userWorkspaceRepository.findOne({
-            where: { userId: workspaceMember.userId, workspaceId },
-          });
+          const userWorkspace = userWorkspaceByUserIdMap.get(
+            workspaceMember.userId,
+          );
 
           if (!userWorkspace) {
             continue;
           }
 
-          const connectedAccounts = await this.connectedAccountRepository.find({
-            where: { userWorkspaceId: userWorkspace.id, workspaceId },
-          });
-
-          const connectedAccountIds = connectedAccounts.map((ca) => ca.id);
+          const connectedAccountIds = (
+            connectedAccountsByUserWorkspaceIdMap.get(userWorkspace.id) ?? []
+          ).map((connectedAccount) => connectedAccount.id);
 
           if (connectedAccountIds.length === 0) {
             continue;
           }
 
-          const messageChannels = await this.messageChannelRepository.find({
-            where: {
-              connectedAccountId: In(connectedAccountIds),
-              syncStage: Not(
-                MessageChannelSyncStage.MESSAGE_LIST_FETCH_PENDING,
-              ),
-              workspaceId,
-            },
-          });
+          const messageChannelsForMember = connectedAccountIds.flatMap(
+            (connectedAccountId) =>
+              messageChannelsByConnectedAccountIdMap.get(
+                connectedAccountId,
+              ) ?? [],
+          );
 
           await this.messagingChannelSyncStatusService.resetAndMarkAsMessagesListFetchPending(
-            messageChannels.map((messageChannel) => messageChannel.id),
+            messageChannelsForMember.map(
+              (messageChannel) => messageChannel.id,
+            ),
             workspaceId,
           );
         }

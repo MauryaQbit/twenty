@@ -334,10 +334,7 @@ export class CalendarChannelSyncStatusService {
           },
         );
 
-        await this.addToAccountsToReconnect(
-          calendarChannels.map((calendarChannel) => calendarChannel.id),
-          workspaceId,
-        );
+        await this.addToAccountsToReconnect(calendarChannels, workspaceId);
       },
       authContext,
       { lite: true },
@@ -350,47 +347,69 @@ export class CalendarChannelSyncStatusService {
   }
 
   private async addToAccountsToReconnect(
-    calendarChannelIds: string[],
+    calendarChannels: Pick<
+      CalendarChannelEntity,
+      'id' | 'connectedAccountId'
+    >[],
     workspaceId: string,
   ) {
-    if (!calendarChannelIds.length) {
+    if (!calendarChannels.length) {
       return;
     }
 
-    const calendarChannels = await this.calendarChannelRepository.find({
-      select: ['id', 'connectedAccountId'],
-      where: {
-        id: Any(calendarChannelIds),
-        workspaceId,
-      },
+    const connectedAccountIds = calendarChannels.map(
+      (calendarChannel) => calendarChannel.connectedAccountId,
+    );
+
+    const connectedAccounts = await this.connectedAccountRepository.find({
+      where: { id: In(connectedAccountIds), workspaceId },
     });
 
+    const connectedAccountById = new Map(
+      connectedAccounts.map((connectedAccount) => [
+        connectedAccount.id,
+        connectedAccount,
+      ]),
+    );
+
+    const userWorkspaceIds = connectedAccounts.map(
+      (connectedAccount) => connectedAccount.userWorkspaceId,
+    );
+
+    const userWorkspaces = await this.userWorkspaceRepository.find({
+      where: { id: In(userWorkspaceIds) },
+      select: ['id', 'userId'],
+    });
+
+    const userIdByUserWorkspaceId = new Map(
+      userWorkspaces.map((userWorkspace) => [
+        userWorkspace.id,
+        userWorkspace.userId,
+      ]),
+    );
+
     for (const calendarChannel of calendarChannels) {
-      const connectedAccount = await this.connectedAccountRepository.findOne({
-        where: { id: calendarChannel.connectedAccountId, workspaceId },
-      });
+      const connectedAccount = connectedAccountById.get(
+        calendarChannel.connectedAccountId,
+      );
 
       if (!connectedAccount) {
         continue;
       }
 
-      const userWorkspace = await this.userWorkspaceRepository.findOne({
-        where: { id: connectedAccount.userWorkspaceId },
-        select: ['userId'],
-      });
+      const userId = userIdByUserWorkspaceId.get(
+        connectedAccount.userWorkspaceId,
+      );
 
-      if (!userWorkspace) {
+      if (!userId) {
         continue;
       }
-
-      const userId = userWorkspace.userId;
-      const connectedAccountId = connectedAccount.id;
 
       await this.accountsToReconnectService.addAccountToReconnectByKey(
         AccountsToReconnectKeys.ACCOUNTS_TO_RECONNECT_INSUFFICIENT_PERMISSIONS,
         userId,
         workspaceId,
-        connectedAccountId,
+        connectedAccount.id,
       );
     }
   }

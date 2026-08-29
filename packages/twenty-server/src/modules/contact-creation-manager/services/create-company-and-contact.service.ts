@@ -62,6 +62,8 @@ export class CreateCompanyAndPersonService {
     workspaceId: string,
     source: FieldActorSource,
     accountOwner: WorkspaceMemberWorkspaceEntity | null,
+    workspaceMembers: WorkspaceMemberWorkspaceEntity[],
+    isInternalMessagesImportEnabled: boolean,
   ): Promise<DeepPartial<PersonWorkspaceEntity>[]> {
     if (!contactsToCreate || contactsToCreate.length === 0) {
       return [];
@@ -77,24 +79,12 @@ export class CreateCompanyAndPersonService {
         },
       );
 
-      const workspaceMemberRepository = this.workspaceOrmManager.getRepository(
-        WorkspaceMemberWorkspaceEntity,
-        { shouldBypassPermissionChecks: true },
-      );
-
-      const workspaceMembers = await workspaceMemberRepository.find();
-
-      const workspace = await this.workspaceRepository.findOne({
-        where: { id: workspaceId },
-        select: ['id', 'isInternalMessagesImportEnabled'],
-      });
-
       const peopleToCreateFromOtherCompanies =
         filterOutContactsThatBelongToSelfOrWorkspaceMembers(
           contactsToCreate,
           connectedAccount,
           workspaceMembers,
-          workspace?.isInternalMessagesImportEnabled ?? false,
+          isInternalMessagesImportEnabled,
         );
 
       const { uniqueContacts, uniqueHandles } = getUniqueContactsAndHandles(
@@ -198,7 +188,12 @@ export class CreateCompanyAndPersonService {
       return;
     }
 
-    const accountOwner =
+    const workspace = await this.workspaceRepository.findOne({
+      where: { id: workspaceId },
+      select: ['id', 'isInternalMessagesImportEnabled'],
+    });
+
+    const { accountOwner, workspaceMembers } =
       await this.workspaceOrmManager.executeInWorkspaceContext(async () => {
         const workspaceMemberRepository =
           this.workspaceOrmManager.getRepository(
@@ -206,9 +201,14 @@ export class CreateCompanyAndPersonService {
             { shouldBypassPermissionChecks: true },
           );
 
-        return workspaceMemberRepository.findOne({
-          where: { userId: userWorkspace.userId },
-        });
+        const [accountOwner, workspaceMembers] = await Promise.all([
+          workspaceMemberRepository.findOne({
+            where: { userId: userWorkspace.userId },
+          }),
+          workspaceMemberRepository.find(),
+        ]);
+
+        return { accountOwner, workspaceMembers };
       }, authContext);
 
     for (const contactsBatch of contactsBatches) {
@@ -219,6 +219,8 @@ export class CreateCompanyAndPersonService {
           workspaceId,
           source,
           accountOwner,
+          workspaceMembers,
+          workspace?.isInternalMessagesImportEnabled ?? false,
         );
       } catch (error) {
         // Concurrent imports for the same workspace can insert the same company

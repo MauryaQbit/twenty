@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import chunk from 'lodash.chunk';
 import { In } from 'typeorm';
 
 import { WorkspaceOrmManager } from 'src/engine/twenty-orm/workspace-orm.manager';
@@ -30,44 +31,64 @@ export class MessagingMessageParticipantService {
             'messageParticipant',
           );
 
-        const existingParticipantsBasedOnMessageIds =
-          await messageParticipantRepository.find({
-            where: {
-              messageId: In(
-                participants.map((participant) => participant.messageId),
-              ),
-            },
-          });
+        const chunkedParticipants = chunk(participants, 200);
 
         const participantsToCreate: Pick<
           MessageParticipantWorkspaceEntity,
           'messageId' | 'handle' | 'displayName' | 'role'
-        >[] = participants
-          .filter(
-            (participant) =>
-              !existingParticipantsBasedOnMessageIds.find(
-                (existingParticipant) =>
-                  existingParticipant.messageId === participant.messageId &&
-                  existingParticipant.handle === participant.handle &&
-                  existingParticipant.displayName === participant.displayName &&
-                  existingParticipant.role === participant.role,
-              ),
-          )
-          .map((participant) => {
-            return {
-              messageId: participant.messageId,
-              handle: participant.handle,
-              displayName: participant.displayName,
-              role: participant.role,
-            };
-          });
+        >[] = [];
 
-        const { identifiers } =
-          await messageParticipantRepository.insert(participantsToCreate);
+        for (const participantsChunk of chunkedParticipants) {
+          const existingParticipantsBasedOnMessageIds =
+            await messageParticipantRepository.find({
+              where: {
+                messageId: In(
+                  participantsChunk.map(
+                    (participant) => participant.messageId,
+                  ),
+                ),
+              },
+            });
 
-        const createdParticipants = await messageParticipantRepository.find({
-          where: { id: In(identifiers.map(({ id }) => id)) },
-        });
+          const newParticipantsToCreate = participantsChunk
+            .filter(
+              (participant) =>
+                !existingParticipantsBasedOnMessageIds.find(
+                  (existingParticipant) =>
+                    existingParticipant.messageId === participant.messageId &&
+                    existingParticipant.handle === participant.handle &&
+                    existingParticipant.displayName ===
+                      participant.displayName &&
+                    existingParticipant.role === participant.role,
+                ),
+            )
+            .map((participant) => {
+              return {
+                messageId: participant.messageId,
+                handle: participant.handle,
+                displayName: participant.displayName,
+                role: participant.role,
+              };
+            });
+
+          participantsToCreate.push(...newParticipantsToCreate);
+        }
+
+        const chunkedParticipantsToCreate = chunk(participantsToCreate, 200);
+        const createdParticipants: MessageParticipantWorkspaceEntity[] = [];
+
+        for (const participantsToCreateChunk of chunkedParticipantsToCreate) {
+          const { identifiers } = await messageParticipantRepository.insert(
+            participantsToCreateChunk,
+          );
+
+          const insertedParticipants =
+            await messageParticipantRepository.find({
+              where: { id: In(identifiers.map(({ id }) => id)) },
+            });
+
+          createdParticipants.push(...insertedParticipants);
+        }
 
         await this.matchParticipantService.matchParticipants({
           participants: createdParticipants,

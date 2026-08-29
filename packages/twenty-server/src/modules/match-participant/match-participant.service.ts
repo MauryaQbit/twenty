@@ -5,6 +5,7 @@ import { isDefined } from 'twenty-shared/utils';
 import { Any, In } from 'typeorm';
 
 import { WorkspaceOrmManager } from 'src/engine/twenty-orm/workspace-orm.manager';
+import { type WorkspaceRepository } from 'src/engine/twenty-orm/repository/workspace-repository';
 import { type WorkspaceTransactionScope } from 'src/engine/twenty-orm/types/workspace-transaction-scope.type';
 import { buildSystemAuthContext } from 'src/engine/twenty-orm/utils/build-system-auth-context.util';
 import { getWorkspaceRepositoryWithOptionalTransaction } from 'src/engine/twenty-orm/utils/get-workspace-repository-with-optional-transaction.util';
@@ -15,6 +16,8 @@ import { findPersonByPrimaryOrAdditionalEmail } from 'src/modules/match-particip
 import { type MessageParticipantWorkspaceEntity } from 'src/modules/messaging/common/standard-objects/message-participant.workspace-entity';
 import { type PersonWorkspaceEntity } from 'src/modules/person/standard-objects/person.workspace-entity';
 import { WorkspaceMemberWorkspaceEntity } from 'src/modules/workspace-member/standard-objects/workspace-member.workspace-entity';
+
+const PARTICIPANT_MATCHING_CHUNK_SIZE = 200;
 
 type ObjectMetadataName = 'messageParticipant' | 'calendarEventParticipant';
 
@@ -82,6 +85,26 @@ export class MatchParticipantService<
     );
   }
 
+  private async findParticipantsByChunkedWhere({
+    participantRepository,
+    ids,
+    buildWhere,
+  }: {
+    participantRepository: WorkspaceRepository<ParticipantWorkspaceEntity>;
+    ids: string[];
+    buildWhere: (chunkedIds: string[]) => Record<string, unknown>;
+  }): Promise<ParticipantWorkspaceEntity[]> {
+    const chunkedIds = chunk(ids, PARTICIPANT_MATCHING_CHUNK_SIZE);
+
+    const chunkedResults = await Promise.all(
+      chunkedIds.map((idsChunk) =>
+        participantRepository.find({ where: buildWhere(idsChunk) }),
+      ),
+    );
+
+    return chunkedResults.flat();
+  }
+
   public async matchParticipants({
     participants,
     sourceRecordIds,
@@ -130,8 +153,10 @@ export class MatchParticipantService<
         },
       );
 
-    const chunkSize = 200;
-    const chunkedParticipants = chunk(participants, chunkSize);
+    const chunkedParticipants = chunk(
+      participants,
+      PARTICIPANT_MATCHING_CHUNK_SIZE,
+    );
 
     for (const participants of chunkedParticipants) {
       const uniqueParticipantsHandles = [
@@ -237,10 +262,12 @@ export class MatchParticipantService<
             transactionScope,
           });
 
-          const participants = await participantRepository.find({
-            where: {
-              workspaceMemberId: In(participantMatching.workspaceMemberIds),
-            },
+          const participants = await this.findParticipantsByChunkedWhere({
+            participantRepository,
+            ids: participantMatching.workspaceMemberIds,
+            buildWhere: (workspaceMemberIds) => ({
+              workspaceMemberId: In(workspaceMemberIds),
+            }),
           });
 
           const rematchedParticipants = participants.map((participant) => ({
@@ -280,20 +307,21 @@ export class MatchParticipantService<
           let participantsMatchingPersonId: ParticipantWorkspaceEntity[] = [];
 
           if (participantMatching.personIds.length > 0) {
-            participantsMatchingPersonId = (await participantRepository.find({
-              where: {
-                personId: In(participantMatching.personIds),
-              },
-            })) as ParticipantWorkspaceEntity[];
+            participantsMatchingPersonId =
+              await this.findParticipantsByChunkedWhere({
+                participantRepository,
+                ids: participantMatching.personIds,
+                buildWhere: (personIds) => ({ personId: In(personIds) }),
+              });
           }
 
           if (participantMatching.personEmails.length > 0) {
             participantsMatchingPersonEmails =
-              (await participantRepository.find({
-                where: {
-                  handle: In(participantMatching.personEmails),
-                },
-              })) as ParticipantWorkspaceEntity[];
+              await this.findParticipantsByChunkedWhere({
+                participantRepository,
+                ids: participantMatching.personEmails,
+                buildWhere: (personEmails) => ({ handle: In(personEmails) }),
+              });
           }
 
           const uniqueParticipants = [

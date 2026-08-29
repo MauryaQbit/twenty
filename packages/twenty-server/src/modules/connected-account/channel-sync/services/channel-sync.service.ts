@@ -8,7 +8,7 @@ import {
   MessageChannelType,
   WebhookSubscriptionChannelType,
 } from 'twenty-shared/types';
-import { Not, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 
 import { InjectMessageQueue } from 'src/engine/core-modules/message-queue/decorators/message-queue.decorator';
 import { MessageQueue } from 'src/engine/core-modules/message-queue/message-queue.constants';
@@ -80,12 +80,12 @@ export class ChannelSyncService {
         },
       });
 
-      for (const messageChannel of messageChannels) {
-        await this.messageChannelSyncStatusService.markAsMessagesListFetchScheduled(
-          [messageChannel.id],
-          workspaceId,
-        );
+      await this.messageChannelSyncStatusService.markAsMessagesListFetchScheduled(
+        messageChannels.map((messageChannel) => messageChannel.id),
+        workspaceId,
+      );
 
+      for (const messageChannel of messageChannels) {
         await this.messageQueueService.add<MessagingMessageListFetchJobData>(
           MessagingMessageListFetchJob.name,
           {
@@ -136,16 +136,23 @@ export class ChannelSyncService {
         },
       });
 
-      for (const calendarChannel of calendarChannels) {
+      if (calendarChannels.length > 0) {
         await this.calendarChannelRepository.update(
-          { id: calendarChannel.id, workspaceId },
+          {
+            id: In(
+              calendarChannels.map((calendarChannel) => calendarChannel.id),
+            ),
+            workspaceId,
+          },
           {
             syncStage:
               CalendarChannelSyncStage.CALENDAR_EVENT_LIST_FETCH_SCHEDULED,
             syncStatus: CalendarChannelSyncStatus.ONGOING,
           },
         );
+      }
 
+      for (const calendarChannel of calendarChannels) {
         await this.calendarQueueService.add<CalendarEventListFetchJobData>(
           CalendarEventListFetchJob.name,
           {

@@ -160,11 +160,11 @@ export class CalendarEventsImportService {
             calendarChannelId: calendarChannel.id,
           });
 
-          await this.calendarEventCleanerService.cleanWorkspaceCalendarEvents(
-            workspaceId,
-          );
-
           if (eventIdsToFetch.length < CALENDAR_EVENT_IMPORT_BATCH_SIZE) {
+            await this.calendarEventCleanerService.cleanWorkspaceCalendarEvents(
+              workspaceId,
+            );
+
             await this.calendarChannelSyncStatusService.markAsCalendarEventSyncCompleted(
               [calendarChannel.id],
               workspaceId,

@@ -48,23 +48,21 @@ export class MessageParticipantWorkspaceMemberListener {
       return;
     }
 
-    for (const eventPayload of payload.events) {
-      if (!eventPayload.properties.after.userEmail) {
-        continue;
-      }
+    const workspaceMemberIds = payload.events
+      .filter((eventPayload) => eventPayload.properties.after.userEmail)
+      .map((eventPayload) => eventPayload.recordId);
 
-      await this.messageQueueService.add<MessageParticipantMatchParticipantJobData>(
-        MessageParticipantMatchParticipantJob.name,
-        {
-          workspaceId: payload.workspaceId,
-          participantMatching: {
-            personIds: [],
-            personEmails: [],
-            workspaceMemberIds: [eventPayload.recordId],
-          },
+    await this.messageQueueService.add<MessageParticipantMatchParticipantJobData>(
+      MessageParticipantMatchParticipantJob.name,
+      {
+        workspaceId: payload.workspaceId,
+        participantMatching: {
+          personIds: [],
+          personEmails: [],
+          workspaceMemberIds,
         },
-      );
-    }
+      },
+    );
   }
 
   @OnDatabaseBatchEvent('workspaceMember', DatabaseEventAction.UPDATED)
@@ -73,25 +71,25 @@ export class MessageParticipantWorkspaceMemberListener {
       ObjectRecordUpdateEvent<WorkspaceMemberWorkspaceEntity>
     >,
   ) {
-    for (const eventPayload of payload.events) {
-      if (
+    const workspaceMemberIds = payload.events
+      .filter((eventPayload) =>
         objectRecordUpdateEventChangedProperties<WorkspaceMemberWorkspaceEntity>(
           eventPayload.properties.before,
           eventPayload.properties.after,
-        ).includes('userEmail')
-      ) {
-        await this.messageQueueService.add<MessageParticipantMatchParticipantJobData>(
-          MessageParticipantMatchParticipantJob.name,
-          {
-            workspaceId: payload.workspaceId,
-            participantMatching: {
-              personIds: [],
-              personEmails: [],
-              workspaceMemberIds: [eventPayload.recordId],
-            },
-          },
-        );
-      }
-    }
+        ).includes('userEmail'),
+      )
+      .map((eventPayload) => eventPayload.recordId);
+
+    await this.messageQueueService.add<MessageParticipantMatchParticipantJobData>(
+      MessageParticipantMatchParticipantJob.name,
+      {
+        workspaceId: payload.workspaceId,
+        participantMatching: {
+          personIds: [],
+          personEmails: [],
+          workspaceMemberIds,
+        },
+      },
+    );
   }
 }

@@ -47,41 +47,54 @@ export class MessagingOngoingStaleJob {
           },
         });
 
-        for (const messageChannel of messageChannels) {
-          if (
-            isSyncStale(toIsoStringOrNull(messageChannel.syncStageStartedAt))
-          ) {
-            await this.messageChannelSyncStatusService.resetSyncStageStartedAt(
-              [messageChannel.id],
-              workspaceId,
-            );
+        const staleMessageChannels = messageChannels.filter((messageChannel) =>
+          isSyncStale(toIsoStringOrNull(messageChannel.syncStageStartedAt)),
+        );
 
-            switch (messageChannel.syncStage) {
-              case MessageChannelSyncStage.MESSAGE_LIST_FETCH_ONGOING:
-              case MessageChannelSyncStage.MESSAGE_LIST_FETCH_SCHEDULED:
-                this.logger.log(
-                  `Sync for message channel ${messageChannel.id} and workspace ${workspaceId} is stale. Setting sync stage to MESSAGE_LIST_FETCH_PENDING`,
-                );
-                await this.messageChannelSyncStatusService.markAsMessagesListFetchPending(
-                  [messageChannel.id],
-                  workspaceId,
-                );
-                break;
-              case MessageChannelSyncStage.MESSAGES_IMPORT_ONGOING:
-              case MessageChannelSyncStage.MESSAGES_IMPORT_SCHEDULED:
-                this.logger.log(
-                  `Sync for message channel ${messageChannel.id} and workspace ${workspaceId} is stale. Setting sync stage to MESSAGES_IMPORT_PENDING`,
-                );
-                await this.messageChannelSyncStatusService.markAsMessagesImportPending(
-                  [messageChannel.id],
-                  workspaceId,
-                );
-                break;
-              default:
-                break;
-            }
+        const staleMessageChannelIds = staleMessageChannels.map(
+          (messageChannel) => messageChannel.id,
+        );
+
+        await this.messageChannelSyncStatusService.resetSyncStageStartedAt(
+          staleMessageChannelIds,
+          workspaceId,
+        );
+
+        const messageChannelIdsToMarkAsListFetchPending: string[] = [];
+        const messageChannelIdsToMarkAsImportPending: string[] = [];
+
+        for (const messageChannel of staleMessageChannels) {
+          switch (messageChannel.syncStage) {
+            case MessageChannelSyncStage.MESSAGE_LIST_FETCH_ONGOING:
+            case MessageChannelSyncStage.MESSAGE_LIST_FETCH_SCHEDULED:
+              this.logger.log(
+                `Sync for message channel ${messageChannel.id} and workspace ${workspaceId} is stale. Setting sync stage to MESSAGE_LIST_FETCH_PENDING`,
+              );
+              messageChannelIdsToMarkAsListFetchPending.push(
+                messageChannel.id,
+              );
+              break;
+            case MessageChannelSyncStage.MESSAGES_IMPORT_ONGOING:
+            case MessageChannelSyncStage.MESSAGES_IMPORT_SCHEDULED:
+              this.logger.log(
+                `Sync for message channel ${messageChannel.id} and workspace ${workspaceId} is stale. Setting sync stage to MESSAGES_IMPORT_PENDING`,
+              );
+              messageChannelIdsToMarkAsImportPending.push(messageChannel.id);
+              break;
+            default:
+              break;
           }
         }
+
+        await this.messageChannelSyncStatusService.markAsMessagesListFetchPending(
+          messageChannelIdsToMarkAsListFetchPending,
+          workspaceId,
+        );
+
+        await this.messageChannelSyncStatusService.markAsMessagesImportPending(
+          messageChannelIdsToMarkAsImportPending,
+          workspaceId,
+        );
       },
       authContext,
       { lite: true },

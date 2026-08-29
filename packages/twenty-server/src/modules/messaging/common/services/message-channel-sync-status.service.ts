@@ -390,26 +390,80 @@ export class MessageChannelSyncStatusService {
         { shouldBypassPermissionChecks: true },
       );
 
+    const connectedAccountIds = messageChannels.map(
+      (messageChannel) => messageChannel.connectedAccountId,
+    );
+
+    const connectedAccounts =
+      connectedAccountIds.length > 0
+        ? await this.connectedAccountRepository.find({
+            where: { id: In(connectedAccountIds), workspaceId },
+          })
+        : [];
+
+    const connectedAccountByIdMap = new Map(
+      connectedAccounts.map((connectedAccount) => [
+        connectedAccount.id,
+        connectedAccount,
+      ]),
+    );
+
+    const userWorkspaceIds = connectedAccounts.map(
+      (connectedAccount) => connectedAccount.userWorkspaceId,
+    );
+
+    const userWorkspaces =
+      userWorkspaceIds.length > 0
+        ? await this.userWorkspaceRepository.find({
+            where: { id: In(userWorkspaceIds) },
+          })
+        : [];
+
+    const userWorkspaceByIdMap = new Map(
+      userWorkspaces.map((userWorkspace) => [
+        userWorkspace.id,
+        userWorkspace,
+      ]),
+    );
+
+    const userIds = userWorkspaces.map(
+      (userWorkspace) => userWorkspace.userId,
+    );
+
+    const workspaceMembers =
+      userIds.length > 0
+        ? await workspaceMemberRepository.find({
+            where: { userId: In(userIds) },
+          })
+        : [];
+
+    const workspaceMemberByUserIdMap = new Map(
+      workspaceMembers.map((workspaceMember) => [
+        workspaceMember.userId,
+        workspaceMember,
+      ]),
+    );
+
     for (const messageChannel of messageChannels) {
-      const connectedAccount = await this.connectedAccountRepository.findOne({
-        where: { id: messageChannel.connectedAccountId, workspaceId },
-      });
+      const connectedAccount = connectedAccountByIdMap.get(
+        messageChannel.connectedAccountId,
+      );
 
       if (!connectedAccount) {
         continue;
       }
 
-      const userWorkspace = await this.userWorkspaceRepository.findOne({
-        where: { id: connectedAccount.userWorkspaceId },
-      });
+      const userWorkspace = userWorkspaceByIdMap.get(
+        connectedAccount.userWorkspaceId,
+      );
 
       if (!userWorkspace) {
         continue;
       }
 
-      const workspaceMember = await workspaceMemberRepository.findOne({
-        where: { userId: userWorkspace.userId },
-      });
+      const workspaceMember = workspaceMemberByUserIdMap.get(
+        userWorkspace.userId,
+      );
 
       if (!workspaceMember) {
         continue;

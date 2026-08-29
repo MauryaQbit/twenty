@@ -67,58 +67,71 @@ export class CalendarEventCleanerService {
 
     await this.workspaceOrmManager.executeInWorkspaceContext(
       async () => {
-        await this.workspaceOrmManager.runInWorkspaceTransaction(
-          async (transactionScope) => {
-            const calendarEventRepository =
-              transactionScope.getRepository<CalendarEventWorkspaceEntity>(
-                'calendarEvent',
-              );
-            const calendarChannelEventAssociationRepository =
-              transactionScope.getRepository<CalendarChannelEventAssociationWorkspaceEntity>(
-                'calendarChannelEventAssociation',
-              );
+        let cursor: string | undefined;
 
-            let cursor: string | undefined;
+        for (;;) {
+          const nextCursor =
+            await this.deleteOrphanCalendarEventsPage(cursor);
 
-            for (;;) {
-              const page = await calendarEventRepository.find({
-                where: isDefined(cursor) ? { id: MoreThan(cursor) } : {},
-                order: { id: 'ASC' },
-                take: CALENDAR_CLEANUP_PAGE_SIZE,
-                select: { id: true },
-              });
+          if (!isDefined(nextCursor)) {
+            break;
+          }
 
-              if (page.length === 0) {
-                break;
-              }
-
-              cursor = page[page.length - 1].id;
-
-              const pageIds = page.map(({ id }) => id);
-
-              const associations =
-                await calendarChannelEventAssociationRepository.find({
-                  where: { calendarEventId: In(pageIds) },
-                  select: { calendarEventId: true },
-                });
-
-              const referencedEventIds = new Set(
-                associations.map(({ calendarEventId }) => calendarEventId),
-              );
-
-              const orphanEventIds = pageIds.filter(
-                (eventId) => !referencedEventIds.has(eventId),
-              );
-
-              if (orphanEventIds.length > 0) {
-                await calendarEventRepository.delete(orphanEventIds);
-              }
-            }
-          },
-        );
+          cursor = nextCursor;
+        }
       },
       authContext,
       { lite: true },
+    );
+  }
+
+  private async deleteOrphanCalendarEventsPage(
+    cursor: string | undefined,
+  ): Promise<string | undefined> {
+    return this.workspaceOrmManager.runInWorkspaceTransaction(
+      async (transactionScope) => {
+        const calendarEventRepository =
+          transactionScope.getRepository<CalendarEventWorkspaceEntity>(
+            'calendarEvent',
+          );
+        const calendarChannelEventAssociationRepository =
+          transactionScope.getRepository<CalendarChannelEventAssociationWorkspaceEntity>(
+            'calendarChannelEventAssociation',
+          );
+
+        const page = await calendarEventRepository.find({
+          where: isDefined(cursor) ? { id: MoreThan(cursor) } : {},
+          order: { id: 'ASC' },
+          take: CALENDAR_CLEANUP_PAGE_SIZE,
+          select: { id: true },
+        });
+
+        if (page.length === 0) {
+          return undefined;
+        }
+
+        const pageIds = page.map(({ id }) => id);
+
+        const associations =
+          await calendarChannelEventAssociationRepository.find({
+            where: { calendarEventId: In(pageIds) },
+            select: { calendarEventId: true },
+          });
+
+        const referencedEventIds = new Set(
+          associations.map(({ calendarEventId }) => calendarEventId),
+        );
+
+        const orphanEventIds = pageIds.filter(
+          (eventId) => !referencedEventIds.has(eventId),
+        );
+
+        if (orphanEventIds.length > 0) {
+          await calendarEventRepository.delete(orphanEventIds);
+        }
+
+        return page[page.length - 1].id;
+      },
     );
   }
 }

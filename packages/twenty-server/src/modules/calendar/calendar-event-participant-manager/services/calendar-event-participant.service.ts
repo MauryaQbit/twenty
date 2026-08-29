@@ -4,7 +4,7 @@ import { isDefined } from 'class-validator';
 import chunk from 'lodash.chunk';
 import differenceWith from 'lodash.differencewith';
 import { FieldActorSource } from 'twenty-shared/types';
-import { Any, In } from 'typeorm';
+import { Any } from 'typeorm';
 
 import { type CalendarChannelEntity } from 'src/engine/metadata-modules/calendar-channel/entities/calendar-channel.entity';
 import { InjectMessageQueue } from 'src/engine/core-modules/message-queue/decorators/message-queue.decorator';
@@ -151,10 +151,14 @@ export class CalendarEventParticipantService {
               participantsToCreateChunk,
             );
 
-          const insertedParticipants =
-            await calendarEventParticipantRepository.find({
-              where: { id: In(identifiers.map(({ id }) => id)) },
-            });
+          const insertedParticipants = participantsToCreateChunk.map(
+            (participant, index) => ({
+              ...participant,
+              id: identifiers[index].id,
+              personId: null,
+              workspaceMemberId: null,
+            }),
+          ) as CalendarEventParticipantWorkspaceEntity[];
 
           savedParticipants.push(...insertedParticipants);
         }

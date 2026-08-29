@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
+import chunk from 'lodash.chunk';
 import {
   ConnectedAccountProvider,
   MessageFolderPendingSyncAction,
@@ -150,20 +151,33 @@ export class SyncMessageFoldersService {
         }
 
         if (foldersToUpdate.size > 0) {
-          for (const [id, data] of foldersToUpdate.entries()) {
-            await this.messageFolderRepository.update(
-              { id, messageChannelId, workspaceId },
-              data as Record<string, unknown>,
+          const foldersToUpdateChunks = chunk(
+            [...foldersToUpdate.entries()],
+            200,
+          );
+
+          for (const foldersToUpdateChunk of foldersToUpdateChunks) {
+            await Promise.all(
+              foldersToUpdateChunk.map(([id, data]) =>
+                this.messageFolderRepository.update(
+                  { id, messageChannelId, workspaceId },
+                  data as Record<string, unknown>,
+                ),
+              ),
             );
           }
         }
 
         if (foldersToCreate.length > 0) {
-          for (const folderToCreate of foldersToCreate) {
-            await this.messageFolderRepository.save({
-              ...folderToCreate,
-              workspaceId,
-            });
+          const foldersToCreateChunks = chunk(foldersToCreate, 200);
+
+          for (const foldersToCreateChunk of foldersToCreateChunks) {
+            await this.messageFolderRepository.insert(
+              foldersToCreateChunk.map((folderToCreate) => ({
+                ...folderToCreate,
+                workspaceId,
+              })),
+            );
           }
         }
 
