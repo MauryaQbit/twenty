@@ -40,6 +40,7 @@ import { isDefined } from 'twenty-shared/utils';
 type MaterializeMessagesArgs = {
   workspaceId: string;
   emailingDomainId: string;
+  userWorkspaceId: string;
   campaignId: string;
   messageChannelId: string;
   fromAddress: string;
@@ -64,6 +65,7 @@ export class MessageCampaignMaterializationService {
     campaignId,
     messageChannelId,
     emailingDomainId,
+    userWorkspaceId,
     recipients,
   }: MaterializeCampaignJobData): Promise<void> {
     await this.workspaceOrmManager.executeInWorkspaceContext(async () => {
@@ -107,26 +109,40 @@ export class MessageCampaignMaterializationService {
         (recipient) => queuedMessageIds.has(recipient.messageId),
       );
 
-      await this.enqueueSendJobs({
-        workspaceId,
-        campaignId,
-        emailingDomainId,
-        recipients: recipientsStrandedByAnEarlierAttempt,
-      });
-
       const recipientsToCreate = uniqueRecipients.filter(
         (recipient) => !existingMessageIds.has(recipient.messageId),
       );
 
+      const messageRepository = this.workspaceOrmManager.getRepository(
+        MessageWorkspaceEntity,
+        { shouldBypassPermissionChecks: true },
+      );
+      const alreadyMaterializedMessages = await messageRepository.find({
+        where: { messageCampaignId: campaignId },
+        select: { id: true },
+      });
+
       await this.materializeAndEnqueue({
+        alreadyMaterializedMessageIds: new Set(
+          alreadyMaterializedMessages.map((message) => message.id),
+        ),
         workspaceId,
         campaignId,
         messageChannelId,
         emailingDomainId,
+        userWorkspaceId,
         fromAddress: campaign.fromAddress?.primaryEmail ?? '',
         subjectTemplate: campaign.subject ?? '',
         bodyTemplate: campaign.bodyTemplate ?? '',
         recipients: recipientsToCreate,
+      });
+
+      await this.enqueueSendJobs({
+        workspaceId,
+        campaignId,
+        emailingDomainId,
+        userWorkspaceId,
+        recipients: recipientsStrandedByAnEarlierAttempt,
       });
 
       await this.messageCampaignLifecycleService.finalizeCampaignIfComplete({
@@ -164,11 +180,15 @@ export class MessageCampaignMaterializationService {
     campaignId,
     messageChannelId,
     emailingDomainId,
+    userWorkspaceId,
     fromAddress,
     subjectTemplate,
     bodyTemplate,
     recipients,
-  }: MaterializeMessagesArgs): Promise<void> {
+    alreadyMaterializedMessageIds,
+  }: MaterializeMessagesArgs & {
+    alreadyMaterializedMessageIds: Set<string>;
+  }): Promise<void> {
     const now = new Date();
     const { plainText: unrenderedText } = await compileCampaignEmailContent(
       bodyTemplate,
@@ -182,6 +202,7 @@ export class MessageCampaignMaterializationService {
 
     for (const recipientsChunk of recipientChunks) {
       await this.insertMessagesBeforeTheirDeliveries({
+        alreadyMaterializedMessageIds,
         workspaceId,
         campaignId,
         messageChannelId,
@@ -198,20 +219,79 @@ export class MessageCampaignMaterializationService {
         workspaceId,
         campaignId,
         emailingDomainId,
+        userWorkspaceId,
         recipients: recipientsChunk,
       });
     }
+  }
+
+  private async insertMessagesBeforeTheirDeliveries({
+    alreadyMaterializedMessageIds,
+    workspaceId,
+    campaignId,
+    messageChannelId,
+    fromAddress,
+    subjectTemplate,
+    text,
+    now,
+    recipients,
+  }: {
+    alreadyMaterializedMessageIds: Set<string>;
+    workspaceId: string;
+    campaignId: string;
+    messageChannelId: string;
+    fromAddress: string;
+    subjectTemplate: string;
+    text: string;
+    now: Date;
+    recipients: CampaignMessageRecipient[];
+  }): Promise<void> {
+    const rows = recipients
+      .filter(
+        (recipient) => !alreadyMaterializedMessageIds.has(recipient.messageId),
+      )
+      .map((recipient) => ({
+        recipient,
+        messageId: recipient.messageId,
+        threadId: v4(),
+        temporaryExternalId: v4(),
+      }));
+
+    if (rows.length > 0) {
+      await this.insertChunk({
+        campaignId,
+        messageChannelId,
+        fromAddress,
+        subjectTemplate,
+        text,
+        now,
+        rows,
+      });
+    }
+
+    await this.campaignDeliveryRepository.upsert(
+      workspaceId,
+      recipients.map((recipient) => ({
+        id: recipient.messageId,
+        campaignId,
+        personId: recipient.personId,
+        recipientEmail: recipient.email,
+      })),
+      { conflictPaths: ['id'], skipUpdateIfNoValuesChanged: true },
+    );
   }
 
   private async enqueueSendJobs({
     workspaceId,
     campaignId,
     emailingDomainId,
+    userWorkspaceId,
     recipients,
   }: {
     workspaceId: string;
     campaignId: string;
     emailingDomainId: string;
+    userWorkspaceId: string;
     recipients: CampaignMessageRecipient[];
   }): Promise<void> {
     if (recipients.length === 0) {
@@ -227,58 +307,12 @@ export class MessageCampaignMaterializationService {
         personId: recipient.personId,
         recipientEmail: recipient.email,
         emailingDomainId,
+        userWorkspaceId,
       })),
       {
         retryLimit: CAMPAIGN_SEND_RETRY_LIMIT,
         backoff: CAMPAIGN_SEND_RETRY_BACKOFF,
       },
-    );
-  }
-
-  private async insertMessagesBeforeTheirDeliveries({
-    workspaceId,
-    campaignId,
-    messageChannelId,
-    fromAddress,
-    subjectTemplate,
-    text,
-    now,
-    recipients,
-  }: {
-    workspaceId: string;
-    campaignId: string;
-    messageChannelId: string;
-    fromAddress: string;
-    subjectTemplate: string;
-    text: string;
-    now: Date;
-    recipients: CampaignMessageRecipient[];
-  }): Promise<void> {
-    await this.insertChunk({
-      campaignId,
-      messageChannelId,
-      fromAddress,
-      subjectTemplate,
-      text,
-      now,
-      rows: recipients.map((recipient) => ({
-        recipient,
-        messageId: recipient.messageId,
-        threadId: v4(),
-        temporaryExternalId: v4(),
-      })),
-    });
-
-    await this.campaignDeliveryRepository.upsert(
-      workspaceId,
-      recipients.map((recipient) => ({
-        id: recipient.messageId,
-        campaignId,
-        personId: recipient.personId,
-        recipientEmail: recipient.email,
-        state: CAMPAIGN_DELIVERY_STATE.QUEUED,
-      })),
-      { conflictPaths: ['id'], skipUpdateIfNoValuesChanged: true },
     );
   }
 

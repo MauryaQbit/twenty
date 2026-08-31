@@ -167,6 +167,7 @@ import { DropHasReachedCurrentPeriodCapFastInstanceCommand } from 'src/database/
 import { AddTimelineActivityHappensAtFieldFastInstanceCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-instance-command-fast-1787918663364-add-timeline-activity-happens-at-field';
 import { AddPageLayoutIsFirstTabPinnedFastInstanceCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-instance-command-fast-1787929843737-add-page-layout-is-first-tab-pinned';
 import { CreateCampaignDeliveryFastInstanceCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-instance-command-fast-1788133997000-create-campaign-delivery';
+import { RenameEmailingDomainPermanentlySuspendedToSandboxFastInstanceCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-instance-command-fast-1788134500000-rename-emailing-domain-permanently-suspended-to-sandbox';
 
 export const INSTANCE_COMMANDS = [
   AddViewFieldGroupIdIndexOnViewFieldFastInstanceCommand,
@@ -336,4 +337,5 @@ export const INSTANCE_COMMANDS = [
   AddTimelineActivityHappensAtFieldFastInstanceCommand,
   AddPageLayoutIsFirstTabPinnedFastInstanceCommand,
   CreateCampaignDeliveryFastInstanceCommand,
+  RenameEmailingDomainPermanentlySuspendedToSandboxFastInstanceCommand,
 ];
