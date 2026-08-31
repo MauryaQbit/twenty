@@ -7,6 +7,7 @@ import { EnableEditLayoutAcrossAppCommand } from 'src/database/commands/upgrade-
 import { BackfillLinkedTimelineActivityHappensAtCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-workspace-command-1787914663665-backfill-linked-timeline-activity-happens-at.command';
 import { ConfigureTimelineActivityHappensAtCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-workspace-command-1787918663365-configure-timeline-activity-happens-at.command';
 import { PinAskAiCommandMenuItemCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-workspace-command-1787938100000-pin-ask-ai-command-menu-item.command';
+import { SyncMessageCampaignSchemaCommand } from 'src/database/commands/upgrade-version-command/2-38/2-38-workspace-command-1788133998000-sync-message-campaign-schema.command';
 import { ApplicationModule } from 'src/engine/core-modules/application/application.module';
 import { WorkspaceSchemaManagerModule } from 'src/engine/twenty-orm/workspace-schema-manager/workspace-schema-manager.module';
 import { WorkspaceCacheModule } from 'src/engine/workspace-cache/workspace-cache.module';
@@ -29,6 +30,7 @@ import { WorkspaceMigrationModule } from 'src/engine/workspace-manager/workspace
     BackfillLinkedTimelineActivityHappensAtCommand,
     ConfigureTimelineActivityHappensAtCommand,
     PinAskAiCommandMenuItemCommand,
+    SyncMessageCampaignSchemaCommand,
   ],
 })
 export class V2_38_UpgradeVersionCommandModule {}
