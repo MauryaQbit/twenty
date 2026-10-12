@@ -1,3 +1,5 @@
+import { lastClickedNavigationMenuItemIdState } from '@/navigation-menu-item/common/states/lastClickedNavigationMenuItemIdState';
+import { navigationMenuItemsSelector } from '@/navigation-menu-item/common/states/navigationMenuItemsSelector';
 import { lastVisitedViewPerObjectMetadataItemState } from '@/navigation/states/lastVisitedViewPerObjectMetadataItemState';
 import { objectMetadataItemsSelector } from '@/object-metadata/states/objectMetadataItemsSelector';
 import { viewsSelector } from '@/views/states/selectors/viewsSelector';
@@ -5,6 +7,7 @@ import { ViewKey } from '@/views/types/ViewKey';
 import { type ViewWithRelations } from '@/views/types/ViewWithRelations';
 import { useIsFeatureEnabled } from '@/workspace/hooks/useIsFeatureEnabled';
 import { useCallback } from 'react';
+import { NavigationMenuItemType } from 'twenty-shared/types';
 import { isDefined } from 'twenty-shared/utils';
 import { useStore } from 'jotai';
 import { FeatureFlagKey } from '~/generated-metadata/graphql';
@@ -22,6 +25,23 @@ export const useSetLastVisitedViewForObjectMetadataNamePlural = () => {
       objectNamePlural: string;
       viewId: string;
     }) => {
+      const lastClickedNavigationMenuItem = store
+        .get(navigationMenuItemsSelector.atom)
+        .find(
+          (navigationMenuItem) =>
+            navigationMenuItem.id ===
+            store.get(lastClickedNavigationMenuItemIdState.atom),
+        );
+
+      // A VIEW sidebar entry pins a single view: recording it as the object's
+      // last visited view would redirect the object's own sidebar entry to it.
+      if (
+        lastClickedNavigationMenuItem?.type === NavigationMenuItemType.VIEW &&
+        lastClickedNavigationMenuItem.viewId === viewId
+      ) {
+        return;
+      }
+
       const views = store.get(viewsSelector.atom);
 
       const view = views.find((view: ViewWithRelations) => view.id === viewId);

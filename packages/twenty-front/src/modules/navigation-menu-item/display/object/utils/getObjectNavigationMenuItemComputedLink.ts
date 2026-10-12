@@ -31,8 +31,19 @@ export const getObjectNavigationMenuItemComputedLink = ({
     isInitialObjectViewEnabled,
   });
 
+  // Ignore a last visited view that no longer exists or belongs to another
+  // object, e.g. after the view was deleted or recreated.
+  const isLastVisitedViewOnObject = isDefined(lastVisitedViewId)
+    ? views.some(
+        (view) =>
+          view.id === lastVisitedViewId &&
+          view.objectMetadataId === objectMetadataItem.id,
+      )
+    : false;
+
   const applicableLastVisitedViewId =
-    isInitialObjectViewEnabled && lastVisitedViewId === indexViewId
+    !isLastVisitedViewOnObject ||
+    (isInitialObjectViewEnabled && lastVisitedViewId === indexViewId)
       ? undefined
       : lastVisitedViewId;
 

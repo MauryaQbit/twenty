@@ -25,6 +25,13 @@ const views: Pick<
     type: ViewType.TABLE,
     position: 0,
   },
+  {
+    id: 'view-custom',
+    objectMetadataId: 'obj-1',
+    key: null,
+    type: ViewType.TABLE,
+    position: 1,
+  },
 ];
 
 const objectItem: NavigationMenuItem = {
@@ -68,6 +75,17 @@ describe('getNavigationMenuItemComputedLink', () => {
       objectMetadataItems,
       views,
       lastVisitedViewPerObjectMetadataItem: { 'obj-2': 'view-other' },
+    });
+
+    expect(link).toBe('/objects/people?viewId=view-index');
+  });
+
+  it('should fall back to the index view when the last visited view no longer exists', () => {
+    const link = getNavigationMenuItemComputedLink({
+      item: objectItem,
+      objectMetadataItems,
+      views,
+      lastVisitedViewPerObjectMetadataItem: { 'obj-1': 'view-deleted' },
     });
 
     expect(link).toBe('/objects/people?viewId=view-index');

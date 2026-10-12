@@ -40,6 +40,20 @@ const mockViewsWithInitialView: Pick<
   },
 ];
 
+const mockViewsWithRegularView: Pick<
+  View,
+  'id' | 'objectMetadataId' | 'key' | 'type' | 'position'
+>[] = [
+  ...mockViews,
+  {
+    id: 'view-regular',
+    objectMetadataId: 'metadata-1',
+    key: null,
+    type: ViewType.TABLE,
+    position: 1,
+  },
+];
+
 describe('getObjectNavigationMenuItemComputedLink', () => {
   it('should link to the index view when no last visited view is provided', () => {
     const result = getObjectNavigationMenuItemComputedLink({
@@ -55,11 +69,11 @@ describe('getObjectNavigationMenuItemComputedLink', () => {
     const result = getObjectNavigationMenuItemComputedLink({
       item: { targetObjectMetadataId: 'metadata-1' },
       objectMetadataItems: mockObjectMetadataItems,
-      views: mockViews,
-      lastVisitedViewId: 'view-42',
+      views: mockViewsWithRegularView,
+      lastVisitedViewId: 'view-regular',
     });
 
-    expect(result).toBe('/objects/people?viewId=view-42');
+    expect(result).toBe('/objects/people?viewId=view-regular');
   });
 
   it('should link to the bare object path when neither a last visited nor an index view exists', () => {
@@ -152,12 +166,12 @@ describe('getObjectNavigationMenuItemComputedLink', () => {
     const result = getObjectNavigationMenuItemComputedLink({
       item: { targetObjectMetadataId: 'metadata-1' },
       objectMetadataItems: mockObjectMetadataItems,
-      views: mockViewsWithInitialView,
-      lastVisitedViewId: 'view-42',
+      views: mockViewsWithRegularView,
+      lastVisitedViewId: 'view-regular',
       isInitialObjectViewEnabled: true,
     });
 
-    expect(result).toBe('/objects/people?viewId=view-42');
+    expect(result).toBe('/objects/people?viewId=view-regular');
   });
 
   it('should still honour a last visited index view when the flag is off', () => {
@@ -167,6 +181,37 @@ describe('getObjectNavigationMenuItemComputedLink', () => {
       views: mockViewsWithInitialView,
       lastVisitedViewId: 'view-index',
       isInitialObjectViewEnabled: false,
+    });
+
+    expect(result).toBe('/objects/people?viewId=view-index');
+  });
+
+  it('should ignore a last visited view that no longer exists', () => {
+    const result = getObjectNavigationMenuItemComputedLink({
+      item: { targetObjectMetadataId: 'metadata-1' },
+      objectMetadataItems: mockObjectMetadataItems,
+      views: mockViews,
+      lastVisitedViewId: 'view-deleted',
+    });
+
+    expect(result).toBe('/objects/people?viewId=view-index');
+  });
+
+  it('should ignore a last visited view that belongs to another object', () => {
+    const result = getObjectNavigationMenuItemComputedLink({
+      item: { targetObjectMetadataId: 'metadata-1' },
+      objectMetadataItems: mockObjectMetadataItems,
+      views: [
+        ...mockViews,
+        {
+          id: 'view-other-object',
+          objectMetadataId: 'metadata-2',
+          key: null,
+          type: ViewType.TABLE,
+          position: 1,
+        },
+      ],
+      lastVisitedViewId: 'view-other-object',
     });
 
     expect(result).toBe('/objects/people?viewId=view-index');
